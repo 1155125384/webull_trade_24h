@@ -1,0 +1,25 @@
+name: Webull ETF Trading
+on:
+  schedule:
+    - cron: '* * * * *' 
+  workflow_dispatch:   # Allows you to run it manually to test
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          pip3 install --upgrade webull-openapi-python-sdk webull-python-sdk-quotes-core webull-python-sdk-trade-events-core webull-python-sdk-core webull-python-sdk-mdata webull-python-sdk-trade
+
+      - name: Run Trading Script
+        run: python trading.py
