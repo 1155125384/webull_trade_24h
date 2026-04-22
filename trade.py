@@ -219,11 +219,11 @@ for symbol in buy_targets:
                 "client_order_id": str(uuid.uuid4().hex),
                 "instrument_id": int(float(inst_id)), 
                 "side": "BUY",
-                "tif": "DAY",
+                "tif": "GTC",
                 "order_type": "LIMIT", 
                 "limit_price": str(clean_limit_price),
                 "qty": str(qty_to_buy),
-                "extended_hours_trading": False
+                "extended_hours_trading": True
             }
 
             api.order.add_custom_headers({"category": "US_STOCK"})
