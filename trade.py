@@ -117,6 +117,8 @@ holdings_lookup = {
     for item in account_position.get('holdings', [])
 }
 
+time.sleep(3)
+
 for symbol in tickers_confirmed_to_sell:
     if symbol in holdings_lookup:
         stock_info = holdings_lookup[symbol]
@@ -149,7 +151,6 @@ for symbol in tickers_confirmed_to_sell:
 
 print("-"*50)
 
-print("Wait for 10 seconds...")
 time.sleep(10)
 res_bal = api.account.get_account_balance(account_id,"USD")
 account_balance = res_bal.json()
@@ -158,55 +159,91 @@ current_cash = float(account_balance.get("total_cash_balance", 0))
 # print("Account Balance:", json.dumps(account_balance, indent=4, sort_keys=True))
 print("Current Cash Balance: USD", current_cash)
 
-MIN_RESERVE_CASH = 200.0  
+MIN_RESERVE_CASH = 200.0 
 MAX_BUY_AMOUNT = 720.0 
+MAX_LOW_CASH_STRIKES = 10
 
-holdings_lookup = {
-    item['symbol']: {
-        'instrument_id': item['instrument_id'],
-        'qty': item['qty'],
-        'last_price': item.get('last_price', '0.00') 
-    } 
-    for ticker in ticker_list_50
-}
+buy_targets = [t for t in ticker_list_50 if t not in current_holdings_list]
 
-for ticker in ticker_list_50:
-    if current_cash <= MIN_RESERVE_CASH:
-        print(f"🛑 Stopping: Cash balance (${current_cash:.2f}) is at or below reserve limit.")
+low_cash_counter = 0  
+
+print(f"Starting buy sequence for {len(buy_targets)} targets...")
+
+for symbol in buy_targets:
+    if low_cash_counter >= MAX_LOW_CASH_STRIKES:
+        print(f"🛑 Stopping: Hit {MAX_LOW_CASH_STRIKES} consecutive 'low cash' skips.")
         break
-    
-    available_to_spend = current_cash - MIN_RESERVE_CASH
-    amount_to_spend = min(MAX_BUY_AMOUNT, available_to_spend)
-    
-    print(f"🚀 Preparing to buy {ticker} with approx ${amount_to_spend:.2f}...")
 
-    last_price = api.quotes.get_latest_price(ticker) 
+    if current_cash <= MIN_RESERVE_CASH:
+        print(f"🛑 Stopping: Cash balance (${current_cash:.2f}) at or below reserve.")
+        break
 
-    qty_to_buy = int(amount_to_spend / last_price)
+    inst_id = None
+    last_price = 0.0
+    active_cat = "US_STOCK" 
 
-    if qty_to_buy > 0:
-        stock_info = holdings_lookup[ticker]
-        buy_order = {
-            "client_order_id": str(uuid.uuid4().hex),
-            "instrument_id": int(float(stock_info['instrument_id'])), 
-            "side": "GTC",
-            "tif": "GTC",
-            "order_type": "LIMIT", 
-            "limit_price": str(last_price),
-            "qty": str(qty_to_buy),
-            "extended_hours_trading": False
-        }
+    try:
+        for cat in ["US_ETF", "US_STOCK"]:
+            res_inst = api.instrument.get_instrument([symbol], cat)
+            if res_inst.status_code == 200:
+                inst_list = res_inst.json()
+                if inst_list and len(inst_list) > 0:
+                    inst_id = inst_list[0].get('instrument_id')
+                    active_cat = cat
+                    break 
 
-        api.order.add_custom_headers({"category": Category.US_STOCK.name})
-        response = api.order.place_order_v2(account_id, buy_order)
-        api.order.remove_custom_headers()
+        if not inst_id:
+            print(f"⏩ Skipping {symbol}: Symbol not found.")
+            continue
+
+        quote_res = api.market_data.get_snapshot([symbol], active_cat)
+        if quote_res.status_code == 200:
+            quote_data = quote_res.json()
+            if isinstance(quote_data, list) and len(quote_data) > 0:
+                last_price = float(quote_data[0].get('price', 0))
         
-        current_cash -= (qty_to_buy * last_price)
-        print(f"✅ Order placed for {ticker}. Remaining estimated cash: ${current_cash:.2f}")
-        
-        time.sleep(1) 
-    else:
-        print(f"⚠️ Skipping {ticker}: Not enough cash to buy even 1 share.")
+        if last_price <= 0:
+            print(f"⏩ Skipping {symbol}: Price unavailable.")
+            continue
+
+        available_to_spend = current_cash - MIN_RESERVE_CASH
+        amount_to_spend = min(MAX_BUY_AMOUNT, available_to_spend)
+        qty_to_buy = int(amount_to_spend / last_price)
+
+        if qty_to_buy > 0:
+            low_cash_counter = 0 
+            clean_limit_price = round(last_price, 2)
+            print(f"🚀 Preparing Order: {qty_to_buy} shares of {symbol} @ ${clean_limit_price}")
+            
+            buy_order = {
+                "client_order_id": str(uuid.uuid4().hex),
+                "instrument_id": int(float(inst_id)), 
+                "side": "BUY",
+                "tif": "DAY",
+                "order_type": "LIMIT", 
+                "limit_price": str(clean_limit_price),
+                "qty": str(qty_to_buy),
+                "extended_hours_trading": False
+            }
+
+            api.order.add_custom_headers({"category": "US_STOCK"})
+            response = api.order.place_order_v2(account_id, buy_order)
+            api.order.remove_custom_headers()
+            
+            if response.status_code == 200:
+                current_cash -= (qty_to_buy * last_price)
+                print(f"✅ Success! Remaining Est. Cash: ${current_cash:.2f}")
+            else:
+                print(f"❌ API Rejected {symbol}: {response.text}")
+            
+            time.sleep(1) 
+        else:
+            low_cash_counter += 1
+            print(f"⚠️ Skipping {symbol}: Not enough cash for 1 share. (Strike {low_cash_counter}/{MAX_LOW_CASH_STRIKES})")
+
+    except Exception as e:
+        print(f"🔥 Error on {symbol}: {e}")
 
 print(f"Final Estimated Cash Balance: ${current_cash:.2f}")
-print("Complete all process")
+print("-"*50)
+print("Completed!")
