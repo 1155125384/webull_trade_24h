@@ -149,7 +149,8 @@ for symbol in tickers_confirmed_to_sell:
 
 print("-"*50)
 
-# time.sleep(10)
+print("Wait for 10 seconds...")
+time.sleep(10)
 res_bal = api.account.get_account_balance(account_id,"USD")
 account_balance = res_bal.json()
 current_cash = float(account_balance.get("total_cash_balance", 0))
@@ -159,6 +160,15 @@ print("Current Cash Balance: USD", current_cash)
 
 MIN_RESERVE_CASH = 200.0  
 MAX_BUY_AMOUNT = 720.0 
+
+holdings_lookup = {
+    item['symbol']: {
+        'instrument_id': item['instrument_id'],
+        'qty': item['qty'],
+        'last_price': item.get('last_price', '0.00') 
+    } 
+    for ticker in ticker_list_50
+}
 
 for ticker in ticker_list_50:
     if current_cash <= MIN_RESERVE_CASH:
@@ -175,11 +185,12 @@ for ticker in ticker_list_50:
     qty_to_buy = int(amount_to_spend / last_price)
 
     if qty_to_buy > 0:
+        stock_info = holdings_lookup[ticker]
         buy_order = {
             "client_order_id": str(uuid.uuid4().hex),
-            "instrument_id": "REPLACE_WITH_ACTUAL_ID", 
+            "instrument_id": int(float(stock_info['instrument_id'])), 
             "side": "GTC",
-            "tif": "DAY",
+            "tif": "GTC",
             "order_type": "LIMIT", 
             "limit_price": str(last_price),
             "qty": str(qty_to_buy),
