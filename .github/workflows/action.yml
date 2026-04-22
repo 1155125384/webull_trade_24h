@@ -22,4 +22,4 @@ jobs:
           pip3 install --upgrade webull-openapi-python-sdk webull-python-sdk-quotes-core webull-python-sdk-trade-events-core webull-python-sdk-core webull-python-sdk-mdata webull-python-sdk-trade
 
       - name: Run Trading Script
-        run: python trading.py
+        run: python trade.py
