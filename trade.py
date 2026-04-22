@@ -159,8 +159,8 @@ current_cash = float(account_balance.get("total_cash_balance", 0))
 # print("Account Balance:", json.dumps(account_balance, indent=4, sort_keys=True))
 print("Current Cash Balance: USD", current_cash)
 
-MIN_RESERVE_CASH = 200.0 
 MAX_BUY_AMOUNT = 720.0 
+MIN_TRANSACTION_AMOUNT = 300.0 
 MAX_LOW_CASH_STRIKES = 10
 
 buy_targets = [t for t in ticker_list_50 if t not in current_holdings_list]
@@ -174,8 +174,8 @@ for symbol in buy_targets:
         print(f"🛑 Stopping: Hit {MAX_LOW_CASH_STRIKES} consecutive 'low cash' skips.")
         break
 
-    if current_cash <= MIN_RESERVE_CASH:
-        print(f"🛑 Stopping: Cash balance (${current_cash:.2f}) at or below reserve.")
+    if current_cash < MIN_TRANSACTION_AMOUNT:
+        print(f"🛑 Stopping: Cash balance (${current_cash:.2f}) is below the $300 minimum.")
         break
 
     inst_id = None
@@ -206,44 +206,56 @@ for symbol in buy_targets:
             print(f"⏩ Skipping {symbol}: Price unavailable.")
             continue
 
-        available_to_spend = current_cash - MIN_RESERVE_CASH
-        amount_to_spend = min(MAX_BUY_AMOUNT, available_to_spend)
-        qty_to_buy = int(amount_to_spend / last_price)
+        amount_to_spend = min(MAX_BUY_AMOUNT, current_cash)
 
-        if qty_to_buy > 0:
-            low_cash_counter = 0 
-            clean_limit_price = round(last_price, 2)
-            print(f"🚀 Preparing Order: {qty_to_buy} shares of {symbol} @ ${clean_limit_price}")
+        if amount_to_spend >= MIN_TRANSACTION_AMOUNT:
+            qty_to_buy = int(amount_to_spend / last_price)
             
-            buy_order = {
-                "client_order_id": str(uuid.uuid4().hex),
-                "instrument_id": int(float(inst_id)), 
-                "side": "BUY",
-                "tif": "GTC",
-                "order_type": "LIMIT", 
-                "limit_price": str(clean_limit_price),
-                "qty": str(qty_to_buy),
-                "extended_hours_trading": True
-            }
+            if qty_to_buy > 0:
+                actual_order_value = qty_to_buy * last_price
+                
+                if actual_order_value >= MIN_TRANSACTION_AMOUNT:
+                    low_cash_counter = 0 
+                    clean_limit_price = round(last_price, 2)
+                    
+                    print(f"🚀 Preparing Order: {qty_to_buy} shares of {symbol} @ ${clean_limit_price} (Total: ${actual_order_value:.2f})")
+                    
+                    buy_order = {
+                        "client_order_id": str(uuid.uuid4().hex),
+                        "instrument_id": int(float(inst_id)), 
+                        "side": "BUY",
+                        "tif": "GTC",
+                        "order_type": "LIMIT", 
+                        "limit_price": str(clean_limit_price),
+                        "qty": str(qty_to_buy),
+                        "extended_hours_trading": True
+                    }
 
-            api.order.add_custom_headers({"category": "US_STOCK"})
-            response = api.order.place_order_v2(account_id, buy_order)
-            api.order.remove_custom_headers()
-            
-            if response.status_code == 200:
-                current_cash -= (qty_to_buy * last_price)
-                print(f"✅ Success! Remaining Est. Cash: ${current_cash:.2f}")
+                    api.order.add_custom_headers({"category": "US_STOCK"})
+                    response = api.order.place_order_v2(account_id, buy_order)
+                    api.order.remove_custom_headers()
+                    
+                    if response.status_code == 200:
+                        current_cash -= actual_order_value
+                        print(f"✅ Success! Remaining Est. Cash: ${current_cash:.2f}")
+                    else:
+                        print(f"❌ API Rejected {symbol}: {response.text}")
+                    
+                    time.sleep(1) 
+                else:
+                    low_cash_counter += 1
+                    print(f"⚠️ Skipping {symbol}: Qty {qty_to_buy} results in ${actual_order_value:.2f} (Under $300 minimum).")
             else:
-                print(f"❌ API Rejected {symbol}: {response.text}")
-            
-            time.sleep(1) 
+                low_cash_counter += 1
+                print(f"⚠️ Skipping {symbol}: Price too high to buy even 1 share.")
         else:
             low_cash_counter += 1
-            print(f"⚠️ Skipping {symbol}: Not enough cash for 1 share. (Strike {low_cash_counter}/{MAX_LOW_CASH_STRIKES})")
+            print(f"⚠️ Skipping {symbol}: Current cash ${current_cash:.2f} is under the $300 transaction minimum.")
 
     except Exception as e:
         print(f"🔥 Error on {symbol}: {e}")
 
 print(f"Final Estimated Cash Balance: ${current_cash:.2f}")
+
 print("-"*50)
 print("Completed!")
