@@ -269,6 +269,6 @@ for i in range(1, 4):
     else:
         # Even Number: 2, 4, 6...
         wait_time = 900 # 15 minutes
-        print(f"Wait for 15 minutes (900s) for next time transaction (Even iteration).")
+        print(f"Wait for 15 to 60 minutes (900s) for next time transaction (Even iteration).")
     
     time.sleep(wait_time)
