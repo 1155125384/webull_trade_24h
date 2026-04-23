@@ -26,8 +26,8 @@ for i in range(1, 4):
     # print(filtered_df.to_string())
     print(f"Tickers with Total_Score > 50: {ticker_list_50}")
     
-    your_app_key = "63d0bd6afb98053ff2ef998f47c7106e"
-    your_app_secret = "a2f11b87ef8d765c6e07f75e7583ca38"
+    your_app_key = os.getenv('APP_KEY')
+    your_app_secret = os.getenv('APP_SECRET')
     
     api_client = ApiClient(your_app_key, your_app_secret, Region.HK.value)
     api = API(api_client)
