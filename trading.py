@@ -10,7 +10,7 @@ import uuid
 import time
 import os
 
-for i in range(1, 35):
+for i in range(1, 15):
     url = 'https://raw.githubusercontent.com/1155125384/trading_all_day_long/main/etf_data.csv'
     response = requests.get(url)
     
