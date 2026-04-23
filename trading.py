@@ -8,6 +8,7 @@ import pandas as pd
 import io
 import uuid
 import time
+import os
 
 for i in range(1, 4):
     url = 'https://raw.githubusercontent.com/1155125384/trading_all_day_long/main/etf_data.csv'
