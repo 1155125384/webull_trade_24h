@@ -68,7 +68,7 @@ for i in range(1, 15):
     tickers_can_be_sell = [
         item["symbol"] 
         for item in holdings 
-        if float(item.get("unrealized_profit_loss_rate", 0)) > 0.003 and (item["symbol"] != "AAPL" and item["symbol"] != "FUTU")
+        if float(item.get("unrealized_profit_loss_rate", 0)) > 0.007 and (item["symbol"] != "AAPL" and item["symbol"] != "FUTU")
     ]
     
     tickers_confirmed_to_sell = [
