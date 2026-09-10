@@ -5,8 +5,11 @@ Upgrades over the original script:
   1) Current holdings are classified into STOCK vs ETF via yfinance (quoteType).
   2) Buying is tilted to keep the portfolio near TARGET_ETF_RATIO (default 60% ETF / 40% stock),
      with natural drift allowed rather than a hard split.
-  3) Buy candidates are pulled from two separate scanner CSVs (stock + ETF), each sorted by
-     final_score descending. Every single purchase is capped at MAX_BUY_AMOUNT (1200 USD).
+  3) Buy candidates are pulled from two separate scanner CSVs (stock + ETF), ordered by a
+     tiered preference: within each score threshold (70, 65, 60, ... step -5), candidates
+     with the "Downtrend" flag go first, then non-"Uptrend" candidates, then "Uptrend"
+     candidates, before moving to the next lower threshold. Every single purchase is
+     capped at MAX_BUY_AMOUNT (1200 USD).
   4) A position is only sold if unrealized P/L > SELL_PROFIT_THRESHOLD (0.3%) AND its
      final_score (looked up from whichever scanner list it belongs to) is below 50.
 
@@ -35,13 +38,21 @@ from tqdm import tqdm
 # ---------------------------------------------------------------------------
 # CONFIG
 # ---------------------------------------------------------------------------
-EXCLUDE_FROM_SELL = {}  # never auto-sell these
 
 STOCK_SCANNER_URL = 'https://raw.githubusercontent.com/1155125384/scanner_stock/main/stock_scanner.csv'
 ETF_SCANNER_URL   = 'https://raw.githubusercontent.com/1155125384/scanner_etf/main/etf_scanner.csv'
 
 TICKER_COL = 'Ticker'
 SCORE_COL  = 'final_score'
+FLAG_COL   = 'Flags'
+
+EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
+# Buy preference tiers: within each score threshold (70, 65, 60, ... stepping down by
+# PREFERENCE_STEP), candidates are ordered: (1) has "Downtrend" flag, (2) does not have
+# "Uptrend" flag, (3) has "Uptrend" flag. A ticker is placed in the first/highest tier
+# it qualifies for and is not reconsidered in lower tiers.
+PREFERENCE_START_THRESHOLD = 67
+PREFERENCE_STEP = 5
 
 TARGET_ETF_RATIO = 0.60          # aim for ~60% ETF / 40% stock by market value
 MAX_BUY_AMOUNT = 1200.0          # cap per individual purchase
@@ -49,13 +60,13 @@ MIN_TRANSACTION_AMOUNT = 300.0   # don't bother placing tiny orders
 MAX_LOW_CASH_STRIKES = 10        # stop trying to buy after this many consecutive skips
 
 SELL_PROFIT_THRESHOLD = 0.003    # +0.3% (used for holdings that ARE in a scanner list)
-SELL_SCORE_THRESHOLD = 50        # sell only if score is BELOW this
+SELL_SCORE_THRESHOLD = 55        # sell only if score is BELOW this
 
 # ETFs currently held that no longer appear in the ETF scanner CSV at all get sold
 # once they're up by at least this much, regardless of score (they have none).
 UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
 
-NUM_CYCLES = 100
+NUM_CYCLES = 14
 ODD_WAIT_SECONDS = 60
 EVEN_WAIT_SECONDS = 900
 
@@ -71,18 +82,62 @@ def fetch_csv(url: str) -> pd.DataFrame:
     return pd.read_csv(io.BytesIO(response.content))
 
 
+def build_buy_preference_order(df, start_threshold=PREFERENCE_START_THRESHOLD, step=PREFERENCE_STEP):
+    """
+    Order tickers by preference tier:
+      For threshold = 70, 65, 60, ... (stepping down by `step`):
+        1) final_score >= threshold AND has "Downtrend" flag
+        2) final_score >= threshold AND does NOT have "Uptrend" flag
+        3) final_score >= threshold AND has "Uptrend" flag
+      Each ticker is claimed by the first (highest-preference) group it matches and is
+      skipped in every subsequent group/threshold.
+    """
+    df = df.copy()
+    df[FLAG_COL] = df[FLAG_COL].fillna('')
+
+    is_downtrend = df[FLAG_COL].str.contains('Downtrend')
+    is_uptrend = df[FLAG_COL].str.contains('Uptrend')
+
+    assigned = set()
+    order = []
+
+    def claim(mask, threshold):
+        sub = df[mask & (df[SCORE_COL] >= threshold) & (~df[TICKER_COL].isin(assigned))]
+        sub = sub.sort_values(SCORE_COL, ascending=False)
+        for t in sub[TICKER_COL]:
+            order.append(t)
+            assigned.add(t)
+
+    min_score = df[SCORE_COL].min() if len(df) else start_threshold
+    threshold = start_threshold
+
+    while threshold > min_score - step:
+        claim(is_downtrend, threshold)
+        claim(~is_uptrend, threshold)
+        claim(is_uptrend, threshold)
+        threshold -= step
+        if len(assigned) >= len(df):
+            break
+
+    # Fallback for anything somehow not captured above (shouldn't normally trigger).
+    leftover = df[~df[TICKER_COL].isin(assigned)].sort_values(SCORE_COL, ascending=False)
+    order.extend(leftover[TICKER_COL].tolist())
+
+    return order
+
+
 def load_scanner_lists():
-    """Load + sort both scanner CSVs by final_score descending."""
-    stock_df = fetch_csv(STOCK_SCANNER_URL).sort_values(SCORE_COL, ascending=False)
-    etf_df = fetch_csv(ETF_SCANNER_URL).sort_values(SCORE_COL, ascending=False)
+    """Load both scanner CSVs and order each by the tiered buy-preference rule."""
+    stock_df = fetch_csv(STOCK_SCANNER_URL)
+    etf_df = fetch_csv(ETF_SCANNER_URL)
 
     stock_scores = dict(zip(stock_df[TICKER_COL], stock_df[SCORE_COL]))
     etf_scores = dict(zip(etf_df[TICKER_COL], etf_df[SCORE_COL]))
 
-    return (
-        stock_df[TICKER_COL].tolist(), stock_scores,
-        etf_df[TICKER_COL].tolist(), etf_scores,
-    )
+    stock_order = build_buy_preference_order(stock_df)
+    etf_order = build_buy_preference_order(etf_df)
+
+    return stock_order, stock_scores, etf_order, etf_scores
 
 
 def classify_holdings(symbols):
