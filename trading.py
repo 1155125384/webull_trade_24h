@@ -59,7 +59,7 @@ NUM_CYCLES = 100
 ODD_WAIT_SECONDS = 60
 EVEN_WAIT_SECONDS = 900
 
-PLACE_LIVE_ORDERS = False   # set to False for a dry run that logs intended orders only
+PLACE_LIVE_ORDERS = TRUE   # set to False for a dry run that logs intended orders only
 
 # ---------------------------------------------------------------------------
 # HELPERS
