@@ -10,8 +10,11 @@ Upgrades over the original script:
      with the "Downtrend" flag go first, then non-"Uptrend" candidates, then "Uptrend"
      candidates, before moving to the next lower threshold. Every single purchase is
      capped at MAX_BUY_AMOUNT (1200 USD).
-  4) A position is only sold if unrealized P/L > SELL_PROFIT_THRESHOLD (0.3%) AND its
-     final_score (looked up from whichever scanner list it belongs to) is below 50.
+  4) A listed position is only sold if unrealized P/L > SELL_PROFIT_THRESHOLD AND its
+     final_score (looked up from whichever scanner list it belongs to) is below
+     SELL_SCORE_THRESHOLD. A held ETF that has dropped off the ETF scanner list entirely
+     is sold once its P/L exceeds UNLISTED_ETF_SELL_PROFIT_THRESHOLD, regardless of score.
+     (See the CONFIG section below for current threshold values.)
 
 Run requirements:
     pip install yfinance tqdm pandas requests
@@ -46,7 +49,6 @@ TICKER_COL = 'Ticker'
 SCORE_COL  = 'final_score'
 FLAG_COL   = 'Flags'
 
-EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
 # Buy preference tiers: within each score threshold (70, 65, 60, ... stepping down by
 # PREFERENCE_STEP), candidates are ordered: (1) has "Downtrend" flag, (2) does not have
 # "Uptrend" flag, (3) has "Uptrend" flag. A ticker is placed in the first/highest tier
@@ -65,6 +67,8 @@ SELL_SCORE_THRESHOLD = 55        # sell only if score is BELOW this
 # ETFs currently held that no longer appear in the ETF scanner CSV at all get sold
 # once they're up by at least this much, regardless of score (they have none).
 UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
+
+EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
 
 NUM_CYCLES = 14
 ODD_WAIT_SECONDS = 60
@@ -325,7 +329,7 @@ for cycle in range(1, NUM_CYCLES + 1):
         u_pnl_rate = float(item.get("unrealized_profit_loss_rate", 0))
         print(f"{item.get('symbol'):<10} | {u_pnl_rate:.2%}")
 
-    # 5) Sell logic (requirement 4): profit > 0.3% AND final_score < 50 -----
+    # 5) Sell logic (requirement 4 + unlisted-ETF rule) -----------------------
     def score_for(symbol):
         if symbol in stock_symbols:
             return stock_scores.get(symbol)
@@ -333,7 +337,10 @@ for cycle in range(1, NUM_CYCLES + 1):
             return etf_scores.get(symbol)
         return None
 
-    tickers_confirmed_to_sell = []
+    sell_listed_stock = []
+    sell_listed_etf = []
+    sell_unlisted_etf = []
+
     for item in holdings:
         symbol = item.get("symbol")
         if symbol in EXCLUDE_FROM_SELL:
@@ -343,17 +350,26 @@ for cycle in range(1, NUM_CYCLES + 1):
 
         if score is None:
             # Not present in either scanner list. If it's a currently-held ETF that has
-            # dropped off the ETF scanner entirely, sell it once it's up +0.5%.
+            # dropped off the ETF scanner entirely, sell it once it's up enough.
             if symbol in etf_symbols and pnl_rate > UNLISTED_ETF_SELL_PROFIT_THRESHOLD:
-                tickers_confirmed_to_sell.append(symbol)
+                sell_unlisted_etf.append(symbol)
             # Unlisted stocks (no score, not an ETF) are left alone — no rule for those yet.
             continue
 
         if pnl_rate > SELL_PROFIT_THRESHOLD and score < SELL_SCORE_THRESHOLD:
-            tickers_confirmed_to_sell.append(symbol)
+            if symbol in etf_symbols:
+                sell_listed_etf.append(symbol)
+            else:
+                sell_listed_stock.append(symbol)
 
-    print("\nTickers to sell (listed: P/L > +0.3% AND final_score < 50; "
-          "unlisted ETFs: P/L > +0.5%):", tickers_confirmed_to_sell)
+    tickers_confirmed_to_sell = sell_listed_stock + sell_listed_etf + sell_unlisted_etf
+
+    print(f"\nListed stocks to sell (P/L > {SELL_PROFIT_THRESHOLD:.1%} AND "
+          f"final_score < {SELL_SCORE_THRESHOLD}): {sell_listed_stock}")
+    print(f"Listed ETFs to sell (P/L > {SELL_PROFIT_THRESHOLD:.1%} AND "
+          f"final_score < {SELL_SCORE_THRESHOLD}): {sell_listed_etf}")
+    print(f"Unlisted ETFs to sell (not in ETF scanner, P/L > "
+          f"{UNLISTED_ETF_SELL_PROFIT_THRESHOLD:.1%}): {sell_unlisted_etf}")
 
     # Anything scoring well enough to keep gets its open order preserved/updated
     keep_symbols = {
@@ -447,7 +463,8 @@ for cycle in range(1, NUM_CYCLES + 1):
                 actual_order_value = qty_to_buy * last_price
                 if actual_order_value < MIN_TRANSACTION_AMOUNT:
                     low_cash_counter += 1
-                    print(f"⚠️ Skipping {symbol}: order value ${actual_order_value:.2f} under $300 minimum.")
+                    print(f"⚠️ Skipping {symbol}: order value ${actual_order_value:.2f} "
+                          f"under ${MIN_TRANSACTION_AMOUNT:.0f} minimum.")
                     continue
 
                 response = place_buy_order(api, account_id, symbol, inst_id, qty_to_buy, last_price, active_cat)
@@ -481,9 +498,9 @@ for cycle in range(1, NUM_CYCLES + 1):
 
     if cycle % 2 != 0:
         wait_time = ODD_WAIT_SECONDS
-        print("Waiting 60s (odd cycle)...")
+        print(f"Waiting {ODD_WAIT_SECONDS}s (odd cycle)...")
     else:
         wait_time = EVEN_WAIT_SECONDS
-        print("Waiting 15 min (even cycle)...")
+        print(f"Waiting {EVEN_WAIT_SECONDS}s (even cycle)...")
 
     time.sleep(wait_time)
