@@ -66,7 +66,7 @@ SELL_SCORE_THRESHOLD = 55        # sell only if score is BELOW this
 
 # ETFs currently held that no longer appear in the ETF scanner CSV at all get sold
 # once they're up by at least this much, regardless of score (they have none).
-UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
+UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.007   # +0.5%
 
 EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
 
