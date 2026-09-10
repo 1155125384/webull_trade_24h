@@ -8,8 +8,10 @@ Upgrades over the original script:
   3) Buy candidates are pulled from two separate scanner CSVs (stock + ETF), ordered by a
      tiered preference: within each score threshold (70, 65, 60, ... step -5), candidates
      with the "Downtrend" flag go first, then non-"Uptrend" candidates, then "Uptrend"
-     candidates, before moving to the next lower threshold. Every single purchase is
-     capped at MAX_BUY_AMOUNT (1200 USD).
+     candidates, before moving to the next lower threshold. Already-held tickers are NOT
+     excluded — MAX_BUY_AMOUNT (1200 USD) is treated as a cap on total position size per
+     symbol, so a held position under the cap can still be topped up (buying only enough
+     to reach the cap), while a position already at/over the cap is skipped.
   4) A listed position is only sold if unrealized P/L > SELL_PROFIT_THRESHOLD AND its
      final_score (looked up from whichever scanner list it belongs to) is below
      SELL_SCORE_THRESHOLD. A held ETF that has dropped off the ETF scanner list entirely
@@ -57,7 +59,7 @@ PREFERENCE_START_THRESHOLD = 67
 PREFERENCE_STEP = 5
 
 TARGET_ETF_RATIO = 0.60          # aim for ~60% ETF / 40% stock by market value
-MAX_BUY_AMOUNT = 1200.0          # cap per individual purchase
+MAX_BUY_AMOUNT = 1200.0          # cap on total position size per symbol (existing + new buys)
 MIN_TRANSACTION_AMOUNT = 300.0   # don't bother placing tiny orders
 MAX_LOW_CASH_STRIKES = 10        # stop trying to buy after this many consecutive skips
 
@@ -66,7 +68,7 @@ SELL_SCORE_THRESHOLD = 55        # sell only if score is BELOW this
 
 # ETFs currently held that no longer appear in the ETF scanner CSV at all get sold
 # once they're up by at least this much, regardless of score (they have none).
-UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.007   # +0.5%
+UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
 
 EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
 
@@ -402,15 +404,15 @@ for cycle in range(1, NUM_CYCLES + 1):
 
     print("-" * 50)
 
-    # 6) Buy logic (requirements 2 + 3): ranked lists, $1200 cap, 60/40 tilt -
+    # 6) Buy logic (requirements 2 + 3): ranked lists, $1200 total-position cap, 60/40 tilt -
     time.sleep(10)
     res_bal = api.account.get_account_balance(account_id, "USD")
     account_balance = res_bal.json()
     current_cash = float(account_balance.get("total_cash_balance", 0))
     print("Current Cash Balance: USD", current_cash)
 
-    stock_targets = [t for t in stock_ranked if t not in current_holdings_list]
-    etf_targets = [t for t in etf_ranked if t not in current_holdings_list]
+    stock_targets = list(stock_ranked)
+    etf_targets = list(etf_ranked)
 
     low_cash_counter = 0
     stock_idx, etf_idx = 0, 0
@@ -449,7 +451,14 @@ for cycle in range(1, NUM_CYCLES + 1):
                     print(f"⏩ Skipping {symbol}: no instrument/price found.")
                     continue
 
-                amount_to_spend = min(MAX_BUY_AMOUNT, current_cash)
+                existing_position_value = position_value(holdings_by_symbol.get(symbol, {}))
+                remaining_room = MAX_BUY_AMOUNT - existing_position_value
+                if remaining_room < MIN_TRANSACTION_AMOUNT:
+                    print(f"⏩ Skipping {symbol}: already holds ${existing_position_value:.2f} "
+                          f"(cap ${MAX_BUY_AMOUNT:.0f}), no room left to add.")
+                    continue
+
+                amount_to_spend = min(remaining_room, current_cash)
                 if amount_to_spend < MIN_TRANSACTION_AMOUNT:
                     low_cash_counter += 1
                     continue
