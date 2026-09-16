@@ -16,6 +16,13 @@ Upgrades over the original script:
      final_score (looked up from whichever scanner list it belongs to) is below
      SELL_SCORE_THRESHOLD. A held ETF that has dropped off the ETF scanner list entirely
      is sold once its P/L exceeds UNLISTED_ETF_SELL_PROFIT_THRESHOLD, regardless of score.
+  5) HARD TAKE-PROFIT OVERRIDE: any held position (listed or unlisted in the scanners)
+     is sold once unrealized P/L exceeds a threshold set by type — ETFs use
+     HARD_TAKE_PROFIT_ETF (default +10%), stocks use HARD_TAKE_PROFIT_STOCK
+     (default +18%) — regardless of score. This is independent of and layered on top
+     of rule 4 — it exists to put a ceiling on gains even for names the scanner still
+     likes, so profit doesn't ride indefinitely on the score's say-so.
+     EXCLUDE_FROM_SELL is still honored.
      (See the CONFIG section below for current threshold values.)
 
 Run requirements:
@@ -69,6 +76,13 @@ SELL_SCORE_THRESHOLD = 55        # sell only if score is BELOW this
 # ETFs currently held that no longer appear in the ETF scanner CSV at all get sold
 # once they're up by at least this much, regardless of score (they have none).
 UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
+
+# Hard ceiling: sell ANY holding (listed or unlisted, any score) once unrealized P/L
+# exceeds the threshold for its type. Takes priority over/independent of the
+# score-gated rule above. Still respects EXCLUDE_FROM_SELL. A symbol not classified as
+# EQUITY or ETF (see "other_symbols" below) falls back to the stock threshold.
+HARD_TAKE_PROFIT_ETF = 0.10      # +10% for ETFs
+HARD_TAKE_PROFIT_STOCK = 0.18    # +18% for stocks
 
 EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
 
@@ -331,7 +345,7 @@ for cycle in range(1, NUM_CYCLES + 1):
         u_pnl_rate = float(item.get("unrealized_profit_loss_rate", 0))
         print(f"{item.get('symbol'):<10} | {u_pnl_rate:.2%}")
 
-    # 5) Sell logic (requirement 4 + unlisted-ETF rule) -----------------------
+    # 5) Sell logic (requirement 4 + unlisted-ETF rule + hard take-profit) ----
     def score_for(symbol):
         if symbol in stock_symbols:
             return stock_scores.get(symbol)
@@ -342,6 +356,7 @@ for cycle in range(1, NUM_CYCLES + 1):
     sell_listed_stock = []
     sell_listed_etf = []
     sell_unlisted_etf = []
+    sell_hard_take_profit = []
 
     for item in holdings:
         symbol = item.get("symbol")
@@ -349,6 +364,16 @@ for cycle in range(1, NUM_CYCLES + 1):
             continue
         pnl_rate = float(item.get("unrealized_profit_loss_rate", 0))
         score = score_for(symbol)
+
+        # Hard take-profit override: sells regardless of score, listed or not.
+        # Checked first/independently so it can catch names the score-gated
+        # rules below would otherwise never touch (e.g. score still >= 55).
+        # ETFs use the lower ETF threshold; stocks (and anything unclassified)
+        # use the stock threshold.
+        hard_take_profit_threshold = HARD_TAKE_PROFIT_ETF if symbol in etf_symbols else HARD_TAKE_PROFIT_STOCK
+        if pnl_rate > hard_take_profit_threshold:
+            sell_hard_take_profit.append(symbol)
+            continue
 
         if score is None:
             # Not present in either scanner list. If it's a currently-held ETF that has
@@ -364,19 +389,26 @@ for cycle in range(1, NUM_CYCLES + 1):
             else:
                 sell_listed_stock.append(symbol)
 
-    tickers_confirmed_to_sell = sell_listed_stock + sell_listed_etf + sell_unlisted_etf
+    tickers_confirmed_to_sell = (
+        sell_hard_take_profit + sell_listed_stock + sell_listed_etf + sell_unlisted_etf
+    )
 
-    print(f"\nListed stocks to sell (P/L > {SELL_PROFIT_THRESHOLD:.1%} AND "
+    print(f"\nHard take-profit sells (ETF P/L > {HARD_TAKE_PROFIT_ETF:.1%} or "
+          f"stock P/L > {HARD_TAKE_PROFIT_STOCK:.1%}, any score): {sell_hard_take_profit}")
+    print(f"Listed stocks to sell (P/L > {SELL_PROFIT_THRESHOLD:.1%} AND "
           f"final_score < {SELL_SCORE_THRESHOLD}): {sell_listed_stock}")
     print(f"Listed ETFs to sell (P/L > {SELL_PROFIT_THRESHOLD:.1%} AND "
           f"final_score < {SELL_SCORE_THRESHOLD}): {sell_listed_etf}")
     print(f"Unlisted ETFs to sell (not in ETF scanner, P/L > "
           f"{UNLISTED_ETF_SELL_PROFIT_THRESHOLD:.1%}): {sell_unlisted_etf}")
 
-    # Anything scoring well enough to keep gets its open order preserved/updated
+    # Anything scoring well enough to keep gets its open order preserved/updated —
+    # unless it's also being force-sold by the hard take-profit rule.
     keep_symbols = {
         s for s in current_holdings_list
-        if score_for(s) is not None and score_for(s) >= SELL_SCORE_THRESHOLD
+        if score_for(s) is not None
+        and score_for(s) >= SELL_SCORE_THRESHOLD
+        and s not in sell_hard_take_profit
     }
     cancel_orders(api, account_id, keep_symbols)
     time.sleep(3)
