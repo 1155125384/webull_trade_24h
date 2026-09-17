@@ -71,7 +71,7 @@ MIN_TRANSACTION_AMOUNT = 300.0   # don't bother placing tiny orders
 MAX_LOW_CASH_STRIKES = 10        # stop trying to buy after this many consecutive skips
 
 SELL_PROFIT_THRESHOLD = 0.003    # +0.3% (used for holdings that ARE in a scanner list)
-SELL_SCORE_THRESHOLD = 55        # sell only if score is BELOW this
+SELL_SCORE_THRESHOLD = 60        # sell only if score is BELOW this
 
 # ETFs currently held that no longer appear in the ETF scanner CSV at all get sold
 # once they're up by at least this much, regardless of score (they have none).
