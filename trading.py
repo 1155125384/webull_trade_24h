@@ -219,6 +219,16 @@ def place_sell_order(api, account_id, symbol, stock_info):
     is_hk = symbol.isdigit() or ".HK" in symbol.upper()
     cat = Category.HK_STOCK.name if is_hk else Category.US_STOCK.name
     o_type = "ENHANCED_LIMIT" if is_hk else "LIMIT"
+    raw_qty = stock_info.get('available_qty', stock_info.get('qty', 0))
+    qty = float(raw_qty)
+    if qty <= 0:
+        raise ValueError(f"{symbol} has no available shares to sell (available_qty={raw_qty!r})")
+    if not qty.is_integer():
+        raise ValueError(
+            f"{symbol} has fractional available shares ({raw_qty!r}); "
+            "this order endpoint requires an integer qty"
+        )
+    qty = int(qty)
 
     sell_order = {
         "client_order_id": str(uuid.uuid4().hex),
@@ -227,7 +237,7 @@ def place_sell_order(api, account_id, symbol, stock_info):
         "tif": "GTC",
         "order_type": o_type,
         "limit_price": stock_info['last_price'],
-        "qty": int(float(stock_info['qty'])),
+        "qty": qty,
         "extended_hours_trading": True
     }
 
@@ -236,9 +246,10 @@ def place_sell_order(api, account_id, symbol, stock_info):
         return None
 
     api.order.add_custom_headers({"category": cat})
-    response = api.order.place_order_v2(account_id, sell_order)
-    api.order.remove_custom_headers()
-    return response
+    try:
+        return api.order.place_order_v2(account_id, sell_order)
+    finally:
+        api.order.remove_custom_headers()
 
 
 def get_instrument_and_price(api, symbol, is_etf):
@@ -417,6 +428,7 @@ for cycle in range(1, NUM_CYCLES + 1):
         item['symbol']: {
             'instrument_id': item['instrument_id'],
             'qty': item['qty'],
+            'available_qty': item.get('available_qty', item['qty']),
             'last_price': item.get('last_price', '0.00')
         }
         for item in holdings
@@ -426,7 +438,11 @@ for cycle in range(1, NUM_CYCLES + 1):
         stock_info = holdings_lookup.get(symbol)
         if not stock_info:
             continue
-        response = place_sell_order(api, account_id, symbol, stock_info)
+        try:
+            response = place_sell_order(api, account_id, symbol, stock_info)
+        except Exception as e:
+            print(f"⏩ Skipping SELL {symbol}: {e}")
+            continue
         if response is None:
             continue
         if response.status_code == 200:
