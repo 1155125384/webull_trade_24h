@@ -23,6 +23,13 @@ Upgrades over the original script:
      of rule 4 — it exists to put a ceiling on gains even for names the scanner still
      likes, so profit doesn't ride indefinitely on the score's say-so.
      EXCLUDE_FROM_SELL is still honored.
+  6) PEAK-AVOIDANCE ON BUYS: before placing a buy order, the script pulls a short window
+     of recent 1-minute intraday bars for the symbol and compares the live snapshot price
+     to the recent baseline average. If the live price is elevated more than
+     PEAK_THRESHOLD_PCT above that baseline, it's treated as a transient intraday spike
+     ("peak-then-revert") rather than a real move, and the buy is skipped for this cycle.
+     The candidate is re-evaluated on the next cycle once the ranked lists reload, so a
+     spike that reverts within a few minutes no longer gets bought at the top of the spike.
      (See the CONFIG section below for current threshold values.)
 
 Run requirements:
@@ -85,6 +92,15 @@ HARD_TAKE_PROFIT_ETF = 0.10      # +10% for ETFs
 HARD_TAKE_PROFIT_STOCK = 0.18    # +18% for stocks
 
 EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
+
+# --- Peak-avoidance on buys -------------------------------------------------
+# Guards against buying right at a brief intraday spike that reverts back to the
+# average price a few minutes later.
+AVOID_PEAK_BUYS = True           # master on/off switch for this check
+PEAK_LOOKBACK_MINUTES = 30       # how many trailing 1-minute bars to pull for context
+PEAK_AVG_WINDOW = 15             # how many of those bars (most recent) form the baseline avg
+PEAK_THRESHOLD_PCT = 0.004       # skip buy if live price is > this % above the baseline avg
+PEAK_MIN_BARS_REQUIRED = 5       # if fewer bars than this are available, don't block the buy
 
 NUM_CYCLES = 50
 ODD_WAIT_SECONDS = 60
@@ -173,6 +189,55 @@ def classify_holdings(symbols):
             results.append({'Ticker': ticker, 'Type': 'ERROR', 'Name': str(e)})
         time.sleep(0.3)
     return pd.DataFrame(results)
+
+
+def is_price_at_peak(symbol, current_price,
+                      lookback_minutes=PEAK_LOOKBACK_MINUTES,
+                      avg_window=PEAK_AVG_WINDOW,
+                      threshold_pct=PEAK_THRESHOLD_PCT,
+                      min_bars_required=PEAK_MIN_BARS_REQUIRED):
+    """
+    Returns True if `current_price` looks like a brief intraday spike relative to the
+    recent trailing average, rather than a genuine sustained move.
+
+    Pulls the last `lookback_minutes` of 1-minute bars for the symbol, takes the most
+    recent `avg_window` of those (excluding the still-forming current bar) as the
+    baseline, and flags a peak if current_price sits more than `threshold_pct` above
+    that baseline average.
+
+    Fails open (returns False, i.e. does NOT block the buy) if intraday data can't be
+    fetched or there isn't enough of it yet (e.g. right at market open) — the point is
+    to filter out obvious spikes, not to add a hard dependency on data availability.
+    """
+    try:
+        hist = yf.Ticker(symbol).history(period="1d", interval="1m")
+    except Exception as e:
+        print(f"⚠️ {symbol}: couldn't fetch intraday history for peak check ({e}); not blocking buy.")
+        return False
+
+    if hist is None or hist.empty or 'Close' not in hist or len(hist) < min_bars_required:
+        return False
+
+    # Drop the most recent (still-forming) bar and use the trailing window before it
+    # as the baseline, so the baseline isn't itself contaminated by the current spike.
+    closes = hist['Close'].iloc[:-1] if len(hist) > 1 else hist['Close']
+    baseline_bars = closes.tail(avg_window)
+    if baseline_bars.empty:
+        return False
+
+    baseline_avg = float(baseline_bars.mean())
+    if baseline_avg <= 0:
+        return False
+
+    deviation = (current_price - baseline_avg) / baseline_avg
+    is_peak = deviation > threshold_pct
+
+    if is_peak:
+        print(f"⚠️ {symbol}: live price ${current_price:.2f} is {deviation:.2%} above the "
+              f"trailing {avg_window}-min avg ${baseline_avg:.2f} — looks like a transient "
+              f"peak, skipping buy this cycle.")
+
+    return is_peak
 
 
 def get_account_and_client():
@@ -452,7 +517,8 @@ for cycle in range(1, NUM_CYCLES + 1):
 
     print("-" * 50)
 
-    # 6) Buy logic (requirements 2 + 3): ranked lists, $1200 total-position cap, 60/40 tilt -
+    # 6) Buy logic (requirements 2 + 3 + 6): ranked lists, $1200 total-position cap,
+    #    60/40 tilt, and peak-avoidance on the live price ----------------------------
     time.sleep(10)
     res_bal = api.account.get_account_balance(account_id, "USD")
     account_balance = res_bal.json()
@@ -504,6 +570,11 @@ for cycle in range(1, NUM_CYCLES + 1):
                 if remaining_room < MIN_TRANSACTION_AMOUNT:
                     print(f"⏩ Skipping {symbol}: already holds ${existing_position_value:.2f} "
                           f"(cap ${MAX_BUY_AMOUNT:.0f}), no room left to add.")
+                    continue
+
+                # Peak-avoidance: skip if the live price looks like a transient spike
+                # relative to the recent trailing average, rather than a real move.
+                if AVOID_PEAK_BUYS and is_price_at_peak(symbol, last_price):
                     continue
 
                 amount_to_spend = min(remaining_room, current_cash)
