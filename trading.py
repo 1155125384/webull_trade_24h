@@ -69,10 +69,10 @@ FLAG_COL   = 'Flags'
 # PREFERENCE_STEP), candidates are ordered: (1) has "Downtrend" flag, (2) does not have
 # "Uptrend" flag, (3) has "Uptrend" flag. A ticker is placed in the first/highest tier
 # it qualifies for and is not reconsidered in lower tiers.
-PREFERENCE_START_THRESHOLD = 67
+PREFERENCE_START_THRESHOLD = 68
 PREFERENCE_STEP = 5
 
-TARGET_ETF_RATIO = 0.60          # aim for ~60% ETF / 40% stock by market value
+TARGET_ETF_RATIO = 0.5          # aim for ~60% ETF / 40% stock by market value
 MAX_BUY_AMOUNT = 1200.0          # cap on total position size per symbol (existing + new buys)
 MIN_TRANSACTION_AMOUNT = 300.0   # don't bother placing tiny orders
 MAX_LOW_CASH_STRIKES = 10        # stop trying to buy after this many consecutive skips
@@ -88,7 +88,7 @@ UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
 # exceeds the threshold for its type. Takes priority over/independent of the
 # score-gated rule above. Still respects EXCLUDE_FROM_SELL. A symbol not classified as
 # EQUITY or ETF (see "other_symbols" below) falls back to the stock threshold.
-HARD_TAKE_PROFIT_ETF = 0.012     # +10% for ETFs
+HARD_TAKE_PROFIT_ETF = 0.007     # +10% for ETFs
 HARD_TAKE_PROFIT_STOCK = 0.05    # +18% for stocks
 
 EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
