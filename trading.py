@@ -88,8 +88,8 @@ UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
 # exceeds the threshold for its type. Takes priority over/independent of the
 # score-gated rule above. Still respects EXCLUDE_FROM_SELL. A symbol not classified as
 # EQUITY or ETF (see "other_symbols" below) falls back to the stock threshold.
-HARD_TAKE_PROFIT_ETF = 0.10      # +10% for ETFs
-HARD_TAKE_PROFIT_STOCK = 0.18    # +18% for stocks
+HARD_TAKE_PROFIT_ETF = 0.012     # +10% for ETFs
+HARD_TAKE_PROFIT_STOCK = 0.05    # +18% for stocks
 
 EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
 
