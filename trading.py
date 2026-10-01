@@ -72,8 +72,8 @@ FLAG_COL   = 'Flags'
 PREFERENCE_START_THRESHOLD = 68
 PREFERENCE_STEP = 5
 
-TARGET_ETF_RATIO = 0.5          # aim for ~60% ETF / 40% stock by market value
-MAX_BUY_AMOUNT = 1200.0          # cap on total position size per symbol (existing + new buys)
+TARGET_ETF_RATIO = 0.3          # aim for ~60% ETF / 40% stock by market value
+MAX_BUY_AMOUNT = 800.0          # cap on total position size per symbol (existing + new buys)
 MIN_TRANSACTION_AMOUNT = 300.0   # don't bother placing tiny orders
 MAX_LOW_CASH_STRIKES = 10        # stop trying to buy after this many consecutive skips
 
