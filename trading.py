@@ -69,7 +69,7 @@ FLAG_COL   = 'Flags'
 # PREFERENCE_STEP), candidates are ordered: (1) has "Downtrend" flag, (2) does not have
 # "Uptrend" flag, (3) has "Uptrend" flag. A ticker is placed in the first/highest tier
 # it qualifies for and is not reconsidered in lower tiers.
-PREFERENCE_START_THRESHOLD = 73
+PREFERENCE_START_THRESHOLD = 68
 PREFERENCE_STEP = 5
 
 TARGET_ETF_RATIO = 0.3          # aim for ~60% ETF / 40% stock by market value
