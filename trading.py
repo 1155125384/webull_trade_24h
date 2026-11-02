@@ -91,7 +91,7 @@ UNLISTED_ETF_SELL_PROFIT_THRESHOLD = 0.005   # +0.5%
 HARD_TAKE_PROFIT_ETF = 0.007     # +10% for ETFs
 HARD_TAKE_PROFIT_STOCK = 0.03    # +18% for stocks
 
-EXCLUDE_FROM_SELL = {"FUTU"}  # never auto-sell these
+EXCLUDE_FROM_SELL = {"FUTU","GOOG","GOOGL"}  # never auto-sell these
 
 # --- Peak-avoidance on buys -------------------------------------------------
 # Guards against buying right at a brief intraday spike that reverts back to the
